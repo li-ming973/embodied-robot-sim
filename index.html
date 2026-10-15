@@ -1,3 +1,4 @@
+Warning: fs was declared with const; use let for reassignable variables.
 <!doctype html>
 <html lang="zh-CN">
 <head>
@@ -1535,7 +1536,7 @@ const { THREE, Lab, MAT, GEO, clamp, approach, fmt } = window.LabKit
 // Failure: balance controller loses torque; gravity integrates the fall angle.
 const lab = new Lab({
   prompt: '具身智能机器人：实时行走与平衡控制',
-  no: 1, title: '具身智能机器人', sub: '电驱人形平台 · 闭环平衡控制',
+  no: 1, title: '具身机器人', sub: '电驱人形 · 平衡控制',
   size: 1.88,
   view: { az: 32, el: 11, dist: 3.4, target: [0, 0.84, 0] },
   cut: { a: [0, 0, 1], b: [0, 1, 0] },
