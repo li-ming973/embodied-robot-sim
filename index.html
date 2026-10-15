@@ -3,8 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>医疗巡检机器人 · 交互物理仿真</title>
-<meta name="description" content="医疗巡检移动机器人交互仿真：差速巡航、车身姿态与安全制动。">
+<title>轮式具身智能机器人 · 交互物理仿真</title>
+<meta name="description" content="轮式具身智能机器人交互仿真：自主巡航、视觉感知、双臂抓取与安全制动。">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
@@ -1521,7 +1521,7 @@ export default LabKit
 </script>
 <!-- lab-kit:end -->
 <script type="module">
-const { THREE, Lab, MAT, GEO, clamp, approach, fmt } = window.LabKit
+const { THREE, Lab, MAT, GEO, clamp, approach, lerp, fmt } = window.LabKit
 
 // Reference-led mobile medical inspection robot, approximately 1.85 m tall and 48 kg.
 // Assembly order: mobile base and wheels; lidar/safety bumper; lift column; torso shell;
@@ -1531,8 +1531,8 @@ const { THREE, Lab, MAT, GEO, clamp, approach, fmt } = window.LabKit
 // Equations: v = r*w; yaw rate = v/R; lean = atan(v^2/(R*g));
 // emergency stop: vdot=-a, d_stop=v0^2/(2a), a=0.55 m/s2. Hero: ground speed.
 const lab=new Lab({
- prompt:'医疗巡检移动机器人：感知、巡航与安全制动',
- no:1,title:'医疗巡检',sub:'移动底盘 · 双臂作业',size:1.85,
+ prompt:'轮式具身智能机器人：感知、导航与双臂抓取',
+ no:1,title:'具身智能',sub:'轮式自主移动 · 双臂感知操作',size:1.85,
  view:{az:28,el:10,dist:4.15,target:[0,.88,0]},
  cut:{a:[0,0,1],b:[0,1,0]},
 })
@@ -1591,6 +1591,7 @@ sphere(neck,.007,amber,[.064,.285,.158],[1,1,.7],'head tracking indicator')
 part(neck,box(.105,.025,.012,.01),dark,[0,.09,.115],'speaker grille')
 // Two compact articulated arms, visible shoulder joints and perforated grippers.
 const arms=[]
+const fingers=[]
 for(const side of [-1,1]){
  const sh=new THREE.Group();sh.position.set(side*.278,.56,-.015);torso.add(sh)
  sphere(sh,.112,pearl,[0,0,0],[1,.9,.9],'rounded shoulder cover')
@@ -1606,21 +1607,32 @@ for(const side of [-1,1]){
  const hand=new THREE.Group();hand.position.set(0,-.39,.015);elbow.add(hand)
  part(hand,box(.11,.10,.095,.03),steel,[0,-.04,.025],'parallel gripper palm')
  for(const finger of [-1,1]){
-  link(hand,.026,.10,.035,silver,[finger*.037,-.12,.045],'compliant gripper finger')
+  const jaw=link(hand,.026,.10,.035,silver,[finger*.037,-.12,.045],'compliant gripper finger');fingers.push({mesh:jaw,side,finger})
   for(let i=0;i<3;i++)sphere(hand,.006,charcoal,[finger*.037,-.095-i*.021,.065],null,'finger tactile pad')
  }
- arms.push({side,upper,elbow})
+ arms.push({side,upper,elbow,hand})
 }
-lab.add(robot,{name:'医疗巡检移动机器人 · 48 kg',count:42,explode:[0,.12,0]})
+// A small sample tube is the visual target for the embodied perception-to-action task.
+const sampleHome=new THREE.Vector3(.36,1.16,.34)
+const sample=new THREE.Group();sample.position.copy(sampleHome);robot.add(sample)
+part(sample,box(.18,.018,.13,.018),dark,[0,-.065,0],'sample presentation tray')
+part(sample,new THREE.CylinderGeometry(.037,.037,.12,32),MAT.glass({color:[.78,.88,.88],roughness:.09,transmission:.7,transparent:true,opacity:.35}),[0,.005,0],'clear sample tube')
+part(sample,new THREE.CylinderGeometry(.027,.027,.062,24),MAT.paint({color:[.12,.55,.63],roughness:.22}),[0,-.024,0],'colored sample fluid')
+part(sample,new THREE.CylinderGeometry(.04,.04,.018,32),teal,[0,.074,0],'sample tube cap')
+lab.add(robot,{name:'轮式具身智能机器人 · 48 kg',count:46,explode:[0,.12,0]})
 lab.label(robot,'视觉与深度感知',{at:[0,1.95,.16],value:()=> '双目视觉 · 深度相机'})
+lab.label(robot,'抓取目标',{at:[.42,1.29,.34],value:()=>sim.pick>.9?'夹持完成':'样本管 · 深度定位'})
 lab.label(robot,'轮式底盘',{at:[.30,.16,.25],value:()=>`${fmt(sim.wheelRpm,0)} rpm · ${fmt(sim.stopDistance,2)} m 急停距离`})
-const sim={speed:0,command:0,dist:0,heading:0,accel:0,wheelRpm:0,lean:0,failed:false,stopDistance:0,turnRadius:.9}
+const sim={speed:0,command:0,dist:0,heading:0,accel:0,wheelRpm:0,lean:0,failed:false,stopDistance:0,turnRadius:.9,pick:0}
 lab.hero({label:'移动速度',unit:'m/s',max:.8,digits:2})
 const drive=lab.slider({id:'drive',label:'巡航指令',min:0,max:.8,value:.12,unit:'m/s',ends:['待机','巡检']})
-lab.how('按参考照片搭建的移动医疗巡检机器人。四个驱动轮沿圆形巡检路线行驶；差速运动学计算轮速与航向，车身按向心加速度产生轻微倾斜。关闭驱动后，控制器按地面减速度计算滑行和停车距离。简化模型没有求解轮胎侧偏、地面接触变形或机械臂的完整动力学。',[
+const task=lab.slider({id:'reach',label:'抓取样本管',min:0,max:100,value:0,unit:'%',ends:['待机','夹取']})
+lab.how('按参考照片搭建的轮式具身智能服务机器人。深度视觉发现托盘上的样本管后，底盘差速运动学驱动自主巡航；右臂用两连杆逆运动学伸手，平行夹爪闭合并将样本移至夹持点。安全控制器按地面减速度计算急停距离。简化模型未求解轮胎接触变形、视觉识别误差或完整关节动力学。',[
  'wheel rpm = 60 v / (2π r),  r = 0.075 m',
  'yaw rate = v / R,  R = 0.90 m',
  'lean = atan(v² / (R g)),  g = 9.81 m/s²',
+ 'arm reach: cos(q₂) = (d² − L₁² − L₂²) / (2L₁L₂)',
+ 'gripper opening = 74 − 42 × grasp (%) mm',
  'emergency stop: v̇ = −0.55 m/s²',
  'dstop = v₀² / (2 × 0.55)',
 ])
@@ -1646,16 +1658,32 @@ lab.onTick((dt)=>{
  sim.lean=Math.atan(sim.speed*sim.speed/(R*9.81))
  torso.rotation.z=sim.lean
  const counterSwing=Math.min(.12,Math.abs(sim.accel)*.08)
- for(const {side,upper,elbow} of arms){upper.rotation.x=side*counterSwing+Math.sin(sim.dist*2.1)*.025;elbow.rotation.x=.05+Math.max(0,sim.speed-.3)*.04}
+ const taskFraction=task.value/100
+ const pickTarget=taskFraction>.82?1:0
+ sim.pick=approach(sim.pick,pickTarget,.28,h)
+ const dDown=.48,dForward=.355,L1=.36,L2=.39,d=Math.min(L1+L2-.005,Math.hypot(dDown,dForward))
+ const q2=Math.acos(clamp((d*d-L1*L1-L2*L2)/(2*L1*L2),-1,1))
+ const q1=Math.atan2(dForward,dDown)-Math.atan2(L2*Math.sin(q2),L1+L2*Math.cos(q2))
+ for(const {side,upper,elbow} of arms){
+  const reach=side>0?taskFraction:0
+  upper.rotation.x=side*counterSwing+Math.sin(sim.dist*2.1)*.025- q1*reach
+  elbow.rotation.x=.05+Math.max(0,sim.speed-.3)*.04+q2*reach
+ }
+ for(const {mesh,side,finger} of fingers){const close=.021*taskFraction;mesh.position.x=finger*(.037-close)}
+ robot.updateMatrixWorld(true)
+ const gripWorld=arms.find(a=>a.side>0).hand.localToWorld(new THREE.Vector3(0,-.055,.09))
+ const gripLocal=robot.worldToLocal(gripWorld.clone())
+ sample.position.lerpVectors(sampleHome,gripLocal,sim.pick)
  const mass=48,rr=.075,perMotorTorque=Math.abs(mass*sim.accel*rr/4)+.45
  const power=mass*Math.abs(sim.accel)*sim.speed+32*sim.speed
  if(sim.failed)sim.stopDistance=Math.max(0,sim.stopDistance-sim.speed*h)
  const state=sim.failed?(sim.speed>.01?'安全制动中':'已安全停车'):sim.speed<.03?'原地待机':'巡检巡航'
- const sub=sim.failed?`停车距离剩余 ${fmt(sim.stopDistance,2)} m · 轮速 ${fmt(sim.wheelRpm,0)} rpm · 制动力矩 ${fmt(perMotorTorque,1)} N·m`:`车身倾角 ${fmt(sim.lean*180/Math.PI,1)}° · 轮速 ${fmt(sim.wheelRpm,0)} rpm · 驱动功率 ${fmt(power,0)} W`
+ const taskState=sim.pick>.9?'样本已夹取':taskFraction>.05?'机械臂接近目标':'感知待命'
+ const sub=sim.failed?`停车距离剩余 ${fmt(sim.stopDistance,2)} m · 轮速 ${fmt(sim.wheelRpm,0)} rpm · 制动力矩 ${fmt(perMotorTorque,1)} N·m`:`${taskState} · 车身倾角 ${fmt(sim.lean*180/Math.PI,1)}° · 轮速 ${fmt(sim.wheelRpm,0)} rpm · 功率 ${fmt(power,0)} W`
  lab.setHero(sim.speed,{state,sub,bad:sim.failed})
 })
-lab.breakIt({label:'触发安全急停',run(){sim.failed=true;sim.stopDistance=sim.speed*sim.speed/(2*.55)},reset(){sim.failed=false;sim.speed=0;sim.command=0;sim.dist=0;sim.heading=0;sim.accel=0;sim.stopDistance=0;robot.position.set(-sim.turnRadius,0,0);robot.rotation.set(0,0,0);robot.position.set(-sim.turnRadius,0,0);for(const w of wheels)w.group.rotation.set(0,0,0);torso.rotation.set(0,0,0)}})
-lab.autoFilm({runBeat:'机器人开始自主巡检。',runSub:'差速轮驱动底盘，视觉传感器持续感知环境。',breakBeat:'触发安全急停。',breakSub:'控制器根据速度计算制动距离。'})
+lab.breakIt({label:'触发安全急停',run(){sim.failed=true;sim.stopDistance=sim.speed*sim.speed/(2*.55)},reset(){sim.failed=false;sim.speed=0;sim.command=0;sim.dist=0;sim.heading=0;sim.accel=0;sim.stopDistance=0;sim.pick=0;task.set(0);sample.position.copy(sampleHome);robot.position.set(-sim.turnRadius,0,0);robot.rotation.set(0,0,0);for(const w of wheels)w.group.rotation.set(0,0,0);torso.rotation.set(0,0,0)}})
+lab.autoFilm({runBeat:'轮式机器人开始执行抓取任务。',runSub:'视觉感知定位样本管，底盘巡航并由双臂完成夹取。',breakBeat:'触发安全急停。',breakSub:'移动控制器根据实时速度计算制动距离。'})
 lab.start()
 </script>
 </body>
