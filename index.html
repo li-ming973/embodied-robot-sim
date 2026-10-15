@@ -1,11 +1,10 @@
-Warning: fs was declared with const; use let for reassignable variables.
 <!doctype html>
 <html lang="zh-CN">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>具身智能机器人 · 交互物理仿真</title>
-<meta name="description" content="具身智能人形机器人交互仿真：步态、关节扭矩与平衡控制。">
+<title>医疗巡检机器人 · 交互物理仿真</title>
+<meta name="description" content="医疗巡检移动机器人交互仿真：差速巡航、车身姿态与安全制动。">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
@@ -1524,149 +1523,139 @@ export default LabKit
 <script type="module">
 const { THREE, Lab, MAT, GEO, clamp, approach, fmt } = window.LabKit
 
-// Concept demonstrator: 1.88 m, 38 kg electric humanoid service robot.
-// Main dimensions (m): height 1.88; shoulder width 0.52; torso 0.43 x 0.54 x 0.28;
-// upper/lower leg 0.40/0.40; upper/lower arm 0.31/0.29; foot 0.25 x 0.11.
-// Materials: painted aluminium shell, titanium links, steel joints, polymer soles,
-// glass sensor visor, copper motor windings. 26 named assemblies, repeated fasteners omitted.
-// Model: inverted pendulum about the ankle/hip plane; I*theta_ddot = m*g*h*sin(theta)+tau;
-// tau=clamp(Kp*(theta_cmd-theta)-Kd*theta_dot, +/-140 Nm); gait f=v/stride;
-// stride=0.55 m; opposing leg swing follows a sinusoidal phase. 38 kg, COM h=0.92 m,
-// g=9.81 m/s2, I=20 kg m2, Kp=520 Nm/rad, Kd=100 Nms/rad. Hero: walking speed.
-// Failure: balance controller loses torque; gravity integrates the fall angle.
-const lab = new Lab({
-  prompt: '具身智能机器人：实时行走与平衡控制',
-  no: 1, title: '具身机器人', sub: '电驱人形 · 平衡控制',
-  size: 1.88,
-  view: { az: 32, el: 11, dist: 3.4, target: [0, 0.84, 0] },
-  cut: { a: [0, 0, 1], b: [0, 1, 0] },
+// Reference-led mobile medical inspection robot, approximately 1.72 m tall and 48 kg.
+// Assembly order: mobile base and wheels; lidar/safety bumper; lift column; torso shell;
+// vision head; shoulder, upper arm, elbow, forearm, wrist and grippers. Painted aluminium,
+// ABS shells, steel bearings, rubber wheels, black glass visor. 4 powered wheels, differential
+// drive approximation, wheel radius 0.075 m, track 0.48 m, patrol radius 0.90 m.
+// Equations: v = r*w; yaw rate = v/R; lean = atan(v^2/(R*g));
+// emergency stop: vdot=-a, d_stop=v0^2/(2a), a=0.55 m/s2. Hero: ground speed.
+const lab=new Lab({
+ prompt:'医疗巡检移动机器人：感知、巡航与安全制动',
+ no:1,title:'医疗巡检',sub:'移动底盘 · 双臂作业',size:1.85,
+ view:{az:28,el:10,dist:4.15,target:[0,.88,0]},
+ cut:{a:[0,0,1],b:[0,1,0]},
 })
-const robot = new THREE.Group(); robot.position.y=.87
-const shell = MAT.paint({color:[0.76,0.79,0.78],roughness:0.28})
-const blue = MAT.anodised({color:[0.055,0.19,0.25],roughness:0.29})
-const titanium = MAT.titanium({roughness:0.29})
-const steel = MAT.stainless({roughness:0.24})
-const dark = MAT.rubber({color:[0.035,0.045,0.05]})
-const orange = MAT.paint({color:[0.92,0.31,0.075],roughness:0.31})
-const visor = MAT.glass({color:[0.12,0.28,0.34],roughness:0.08,transmission:0.18,transparent:true,opacity:0.92})
-const led = MAT.glow({emissive:[0.2,0.78,1],emissiveIntensity:2.4})
-const box=(w,h,d,r=0.025)=>GEO.rbox(w,h,d,r)
-const part=(parent,geo,mat,pos,name)=>{const m=new THREE.Mesh(geo,mat);m.position.set(...pos);m.castShadow=true;m.receiveShadow=true;m.name=name;parent.add(m);return m}
-const sphere=(parent,r,mat,pos,name)=>{const m=new THREE.Mesh(new THREE.SphereGeometry(r,28,18),mat);m.position.set(...pos);m.castShadow=true;m.name=name;parent.add(m);return m}
-const link=(parent,w,len,d,mat,pos,name)=>part(parent,box(w,len,d,Math.min(w,d)*0.35),mat,pos,name)
-// Lower chassis, waist bearing and battery.
-part(robot,box(.30,.20,.22,.05),blue,[0,-.015,0],'pelvis · aluminium chassis')
-part(robot,box(.22,.22,.16,.035),steel,[0,-.012,-.025],'battery · 1.8 kWh pack')
-part(robot,box(.18,.055,.19,.018),orange,[0,.105,0],'waist torque ring')
-// Torso and articulated upper body on a waist pivot.
-const upper=new THREE.Group(); upper.position.set(0,.09,0); robot.add(upper)
-part(upper,box(.40,.49,.25,.075),shell,[0,.37,0],'ribbed torso shell')
-part(upper,box(.33,.31,.19,.045),blue,[0,.39,.035],'thorax load frame')
-part(upper,box(.30,.07,.20,.022),orange,[0,.145,.01],'abdominal status band')
-part(upper,box(.42,.10,.22,.035),steel,[0,.12,0],'pelvis cross member')
-part(upper,box(.16,.10,.15,.025),titanium,[0,.67,0],'neck gimbal')
-// Chest sensor window and small depth-camera lenses.
-part(upper,box(.19,.09,.018,.018),visor,[0,.43,.133],'depth camera window')
-sphere(upper,.019,led,[-.052,.43,.15],'left depth lens'); sphere(upper,.019,led,[.052,.43,.15],'right depth lens')
-part(upper,box(.12,.025,.016,.007),orange,[0,.24,.135],'diagnostic light bar')
-// Head shell, visor, lidar crown and microphone pair.
-const head=new THREE.Group(); head.position.set(0,.77,0); upper.add(head)
-part(head,box(.24,.23,.22,.065),shell,[0,0,0],'head enclosure')
-part(head,box(.19,.082,.018,.022),visor,[0,.012,.112],'panoramic vision visor')
-for(const x of [-.055,.055]) sphere(head,.013,led,[x,.012,.13],'stereo camera')
-part(head,box(.11,.045,.11,.018),blue,[0,.125,0],'360 lidar housing')
-part(head,box(.08,.018,.08,.008),steel,[0,.153,0],'lidar optical cap')
-for(const x of [-.092,.092]) sphere(head,.012,steel,[x,-.035,.035],'microphone array')
-// Two seven-axis arms: shoulder, upper link, elbow actuator, forearm and gripper.
+const robot=new THREE.Group();robot.position.x=-.9
+const white=MAT.paint({color:[.83,.84,.82],roughness:.26,clearcoat:.18})
+const pearl=MAT.paint({color:[.96,.96,.93],roughness:.24,clearcoat:.3})
+const charcoal=MAT.rubber({color:[.035,.04,.045]})
+const dark=MAT.anodised({color:[.055,.065,.07],roughness:.22})
+const steel=MAT.stainless({roughness:.24})
+const silver=MAT.aluminiumMachined({roughness:.25})
+const teal=MAT.anodised({color:[.035,.28,.29],roughness:.27})
+const amber=MAT.glow({emissive:[.58,.82,.28],emissiveIntensity:1.5})
+const visor=MAT.glass({color:[.025,.03,.035],roughness:.08,transmission:.04,transparent:true,opacity:.98})
+const box=(w,h,d,r=.025)=>GEO.rbox(w,h,d,r)
+function part(parent,geo,mat,pos,name){const m=new THREE.Mesh(geo,mat);m.position.set(...pos);m.name=name;m.castShadow=true;m.receiveShadow=true;parent.add(m);return m}
+function sphere(parent,r,mat,pos,scale,name){const m=new THREE.Mesh(new THREE.SphereGeometry(r,32,24),mat);m.position.set(...pos);if(scale)m.scale.set(...scale);m.name=name;m.castShadow=true;m.receiveShadow=true;parent.add(m);return m}
+function link(parent,w,h,d,mat,pos,name){return part(parent,box(w,h,d,Math.min(w,d)*.35),mat,pos,name)}
+// Low rounded mobile base with rubber drive wheels and integrated proximity sensors.
+part(robot,box(.66,.18,.62,.075),pearl,[0,.17,0],'formed polymer mobile base')
+part(robot,box(.61,.045,.57,.025),dark,[0,.067,0],'lower impact bumper')
+part(robot,box(.57,.07,.54,.05),white,[0,.285,-.005],'upper base cover')
+part(robot,box(.19,.038,.018,.008),charcoal,[0,.14,.322],'front depth sensor')
+part(robot,box(.07,.025,.017,.008),charcoal,[0,.105,.326],'front lidar window')
+for(const x of [-.22,.22]){
+ const strip=part(robot,box(.16,.012,.015,.006),amber,[x,.20,.312],'status light strip');strip.material=MAT.glow({emissive:[.68,.9,.4],emissiveIntensity:1.2})
+}
+const wheels=[]
+for(const x of [-.285,.285])for(const z of [-.205,.205]){
+ const wg=new THREE.Group();wg.position.set(x,.105,z);robot.add(wg)
+ const tire=part(wg,new THREE.CylinderGeometry(.076,.076,.065,36),charcoal,[0,0,0],'rubber drive wheel');tire.rotation.z=Math.PI/2
+ const hub=part(wg,new THREE.CylinderGeometry(.038,.038,.069,32),silver,[0,0,0],'machined wheel hub');hub.rotation.z=Math.PI/2
+ wheels.push({group:wg,side:x})
+}
+// Powered centre column and lift joint.
+part(robot,box(.22,.63,.22,.055),silver,[0,.66,-.025],'telescoping aluminium lift column')
+part(robot,box(.28,.16,.27,.04),white,[0,.99,-.025],'torso rotary bearing')
+part(robot,box(.19,.08,.19,.025),dark,[0,1.07,-.025],'upper body yaw actuator')
+// Smooth healthcare service torso.
+const torso=new THREE.Group();torso.position.set(0,1.08,0);robot.add(torso)
+part(torso,box(.50,.68,.31,.11),pearl,[0,.30,0],'one-piece medical torso fairing')
+part(torso,box(.45,.54,.24,.085),white,[0,.29,-.035],'inner magnesium frame')
+part(torso,box(.10,.29,.035,.035),charcoal,[0,.12,.16],'vertical health-status display')
+part(torso,box(.16,.065,.025,.02),visor,[0,.52,.162],'upper torso sensor window')
+sphere(torso,.071,pearl,[0,.405,.166],[1,1,.32],'circular emergency call panel')
+sphere(torso,.029,steel,[0,.405,.191],[1,1,.35],'call button bezel')
+sphere(torso,.009,teal,[0,.405,.203],[1,1,.4],'call button indicator')
+part(torso,box(.085,.025,.018,.007),teal,[0,.60,.163],'torso status light')
+// Black glossy oval vision head with depth camera and perimeter shell.
+const neck=new THREE.Group();neck.position.set(0,.68,-.01);torso.add(neck)
+part(neck,box(.13,.09,.13,.03),silver,[0,.02,0],'head pitch gimbal')
+sphere(neck,.16,pearl,[0,.235,0],[.95,1.12,.82],'white head fairing')
+sphere(neck,.145,visor,[0,.24,.055],[.88,1.08,.78],'black panoramic vision display')
+part(neck,box(.066,.038,.012,.009),silver,[0,.235,.17],'central depth-camera bezel')
+part(neck,box(.047,.022,.009,.004),charcoal,[0,.235,.179],'stereo depth camera')
+sphere(neck,.007,amber,[.064,.285,.158],[1,1,.7],'head tracking indicator')
+part(neck,box(.105,.025,.012,.01),dark,[0,.09,.115],'speaker grille')
+// Two compact articulated arms, visible shoulder joints and perforated grippers.
 const arms=[]
 for(const side of [-1,1]){
-  const sh=new THREE.Group(); sh.position.set(side*.235,.57,0); upper.add(sh)
-  sphere(sh,.088,blue,[0,0,0],`shoulder ${side}`)
-  const u=new THREE.Group(); sh.add(u); arms.push({side,sh,u})
-  link(u,.105,.29,.105,titanium,[0,-.17,0],'upper arm titanium link')
-  part(u,GEO.disc(.071,.045),orange,[0,-.32,.012],'elbow actuator');
-  const el=new THREE.Group();el.position.set(0,-.34,0);u.add(el)
-  sphere(el,.062,steel,[0,0,0],'elbow bearing')
-  link(el,.085,.275,.086,blue,[0,-.15,0],'forearm actuator housing')
-  part(el,box(.075,.08,.08,.02),orange,[0,-.285,.008],'wrist torque sensor')
-  const hand=new THREE.Group();hand.position.set(0,-.31,.015);el.add(hand)
-  part(hand,box(.09,.095,.075,.025),steel,[0,-.045,.02],'adaptive gripper palm')
-  for(const f of [-1,1]) link(hand,.018,.08,.024,titanium,[f*.031,-.125,.04],'compliant gripper finger')
-  part(sh,box(.115,.045,.12,.015),orange,[0,.065,0],'shoulder service cover')
+ const sh=new THREE.Group();sh.position.set(side*.278,.56,-.015);torso.add(sh)
+ sphere(sh,.112,pearl,[0,0,0],[1,.9,.9],'rounded shoulder cover')
+ const axis=part(sh,new THREE.CylinderGeometry(.078,.078,.054,40),silver,[0,0,.055],'shoulder rotary bearing');axis.rotation.x=Math.PI/2
+ const upper=new THREE.Group();sh.add(upper)
+ link(upper,.135,.31,.145,pearl,[0,-.19,.005],'white upper-arm casing')
+ part(upper,box(.11,.22,.11,.025),silver,[0,-.20,-.054],'arm load-bearing link')
+ const elbow=new THREE.Group();elbow.position.set(0,-.36,0);upper.add(elbow)
+ sphere(elbow,.073,pearl,[0,0,0],[1,.95,.9],'elbow cover')
+ const ea=part(elbow,new THREE.CylinderGeometry(.053,.053,.05,32),dark,[0,0,.045],'elbow servo');ea.rotation.x=Math.PI/2
+ link(elbow,.118,.31,.125,pearl,[0,-.18,.01],'forearm shell')
+ part(elbow,box(.095,.12,.10,.025),silver,[0,-.31,.012],'wrist load cell')
+ const hand=new THREE.Group();hand.position.set(0,-.39,.015);elbow.add(hand)
+ part(hand,box(.11,.10,.095,.03),steel,[0,-.04,.025],'parallel gripper palm')
+ for(const finger of [-1,1]){
+  link(hand,.026,.10,.035,silver,[finger*.037,-.12,.045],'compliant gripper finger')
+  for(let i=0;i<3;i++)sphere(hand,.006,charcoal,[finger*.037,-.095-i*.021,.065],null,'finger tactile pad')
+ }
+ arms.push({side,upper,elbow})
 }
-// Two legs with independent hip, knee and ankle modules; 12 mm compliant foot sole.
-const legs=[]
-for(const side of [-1,1]){
-  const hip=new THREE.Group();hip.position.set(side*.115,0,0);robot.add(hip);legs.push({side,hip})
-  sphere(hip,.082,blue,[0,0,0],`hip bearing ${side}`)
-  part(hip,GEO.disc(.072,.055),orange,[0,0,.025],'hip roll motor')
-  link(hip,.15,.355,.16,shell,[0,-.20,-.008],'hollow thigh shell')
-  part(hip,box(.075,.19,.11,.025),titanium,[0,-.21,.079],'thigh load strut')
-  const knee=new THREE.Group();knee.position.set(0,-.39,0);hip.add(knee)
-  sphere(knee,.071,steel,[0,0,0],'knee spherical bearing')
-  part(knee,GEO.disc(.065,.05),orange,[0,0,.025],'knee harmonic drive')
-  link(knee,.125,.355,.13,blue,[0,-.19,0],'shin actuator shell')
-  part(knee,box(.067,.20,.09,.02),titanium,[0,-.20,.066],'tibial load strut')
-  const ankle=new THREE.Group();ankle.position.set(0,-.385,0);knee.add(ankle)
-  sphere(ankle,.052,steel,[0,0,0],'ankle force torque sensor')
-  part(ankle,box(.16,.065,.26,.035),blue,[0,-.036,.055],'carbon foot plate')
-  part(ankle,box(.166,.025,.265,.012),dark,[0,-.079,.055],'high friction elastomer sole')
-  for(const z of [-.035,.13]) sphere(ankle,.012,orange,[side*.04,-.016,z],'foot pressure cell')
-}
-// Fine details: exposed cable looms run along the limbs, not through joints.
-for(const side of [-1,1]){
-  part(robot,box(.018,.29,.018,.008),MAT.rubber(),[side*.19,.52,-.076],'arm harness')
-  part(robot,box(.02,.37,.018,.008),MAT.rubber(),[side*.19,-.37,-.078],'leg harness')
-}
-lab.add(robot,{name:'Embodied humanoid · 38 kg',count:38,explode:[0,.12,0]})
-lab.label(robot,'感知头部',{at:[0,1.77,.13],value:()=> 'stereo depth · 360° lidar'})
-lab.label(robot,'力矩控制腿部',{at:[.18,.48,.07],value:()=>`${fmt(sim.torque,0)} N·m · ${fmt(sim.phaseHz,2)} Hz`})
-
-const sim={theta:0,omega:0,torque:0,speed:0,phase:0,phaseHz:0,failed:false,fallT:0,cmd:0}
-lab.hero({label:'行走速度',unit:'m/s',max:1.8,digits:2})
-const gait=lab.slider({id:'gait',label:'步行指令',min:0,max:1.8,value:.65,unit:'m/s',ends:['站立','快速行走']} )
-lab.how('这是一个简化的人形机器人平衡模型：踝关节控制器把质心视作倒立摆并实时稳定，左右腿按相反相位生成步态。它用于直观展示控制原理；足地接触、自碰撞和神经感知均作了简化，没有运行完整的多刚体接触求解。',[
- 'I θ̈ = m g h sin(θ) + τ,  I = 20 kg·m²',
- 'τ = clamp(520(θcmd − θ) − 100 θ̇, ±140 N·m)',
- 'θcmd = 0.035 v;  fstep = v / 0.55 m',
- '左右髋关节 = ±0.32 sin(2π fstep t)',
- '电机估算功率 ≈ |τ θ̇| + 46 v  W',
+lab.add(robot,{name:'医疗巡检移动机器人 · 48 kg',count:42,explode:[0,.12,0]})
+lab.label(robot,'视觉与深度感知',{at:[0,1.95,.16],value:()=> '双目视觉 · 深度相机'})
+lab.label(robot,'轮式底盘',{at:[.30,.16,.25],value:()=>`${fmt(sim.wheelRpm,0)} rpm · ${fmt(sim.stopDistance,2)} m 急停距离`})
+const sim={speed:0,command:0,dist:0,heading:0,accel:0,wheelRpm:0,lean:0,failed:false,stopDistance:0,turnRadius:.9}
+lab.hero({label:'移动速度',unit:'m/s',max:.8,digits:2})
+const drive=lab.slider({id:'drive',label:'巡航指令',min:0,max:.8,value:.28,unit:'m/s',ends:['待机','巡检']})
+lab.how('按参考照片搭建的移动医疗巡检机器人。四个驱动轮沿圆形巡检路线行驶；差速运动学计算轮速与航向，车身按向心加速度产生轻微倾斜。关闭驱动后，控制器按地面减速度计算滑行和停车距离。简化模型没有求解轮胎侧偏、地面接触变形或机械臂的完整动力学。',[
+ 'wheel rpm = 60 v / (2π r),  r = 0.075 m',
+ 'yaw rate = v / R,  R = 0.90 m',
+ 'lean = atan(v² / (R g)),  g = 9.81 m/s²',
+ 'emergency stop: v̇ = −0.55 m/s²',
+ 'dstop = v₀² / (2 × 0.55)',
 ])
 lab.onTick((dt)=>{
- const h=Math.min(dt,.04),v=sim.failed?0:gait.value
- sim.cmd=v;sim.speed=approach(sim.speed,v,.55,h)
- sim.phaseHz=sim.speed/.55
- const target=.035*sim.speed
- sim.torque=sim.failed?0:clamp(520*(target-sim.theta)-100*sim.omega,-140,140)
- const I=20,m=38,g=9.81,com=.92
- const acc=(m*g*com*Math.sin(sim.theta)+sim.torque)/I
- sim.omega+=acc*h;sim.theta+=sim.omega*h
- if(!sim.failed){
-   sim.phase+=2*Math.PI*sim.phaseHz*h
-   const s=Math.sin(sim.phase),sw=Math.max(0,s)
-   for(const {side,hip} of legs){
-     const ph=side===1?sim.phase:sim.phase+Math.PI
-     const step=Math.sin(ph),lift=Math.max(0,Math.cos(ph))
-     hip.rotation.x=-step*.32*clamp(sim.speed/1.1)
-     hip.rotation.z=side*.025*clamp(sim.speed/1.1)
-     const knee=hip.children.find(o=>o.type==='Group')
-     if(knee){knee.rotation.x=Math.max(0,-Math.cos(ph))*.48*clamp(sim.speed/1.1);const ankle=knee.children.find(o=>o.type==='Group');if(ankle)ankle.rotation.x=-hip.rotation.x*.55-knee.rotation.x*.45}
-   }
-   for(const {side,u} of arms){u.rotation.x=side*Math.sin(sim.phase)*.22*clamp(sim.speed/1.1);const el=u.children.find(o=>o.type==='Group');if(el)el.rotation.x=.12+Math.max(0,Math.sin(sim.phase*2+side))*.08}
-   upper.rotation.x=sim.theta
-   head.rotation.x=-sim.theta*.35
- } else {
-   sim.fallT+=h
-   robot.rotation.x=sim.theta
-   robot.position.y=.79*Math.cos(Math.min(Math.abs(sim.theta),1.35))+.08
-   robot.position.z=.30*Math.sin(sim.theta)
-   upper.rotation.x=0
- }
- const power=sim.failed?0:Math.abs(sim.torque*sim.omega)+46*sim.speed
- lab.setHero(sim.failed?0:sim.speed,{state:sim.failed?'控制失效 · 正在倾倒':sim.speed<.03?'平衡站立':sim.omega>.12?'姿态修正中':'行走中',sub:`姿态偏差 ${fmt(sim.theta*180/Math.PI,1)}° · 踝关节力矩 ${fmt(sim.torque,0)} N·m · 驱动功率 ${fmt(power,0)} W`,bad:sim.failed})
+ const h=Math.min(dt,.04)
+ const target=sim.failed?0:drive.value
+ const old=sim.speed
+ if(sim.failed)sim.speed=Math.max(0,sim.speed-.55*h)
+ else sim.speed=approach(sim.speed,target,.48,h)
+ sim.accel=(sim.speed-old)/Math.max(h,1e-5)
+ sim.dist+=sim.speed*h
+ sim.heading=sim.dist/sim.turnRadius
+ const yawRate=sim.speed/sim.turnRadius
+ const R=sim.turnRadius
+ robot.position.x=R*(1-Math.cos(sim.heading))-R
+ robot.position.z=R*Math.sin(sim.heading)
+ robot.rotation.y=sim.heading
+ // Four hub motors share the commanded ground speed; wheel rotation is shown at 1:8 for legibility.
+ const wheelOmega=sim.speed/.075
+ sim.wheelRpm=wheelOmega*60/(2*Math.PI)
+ for(const w of wheels){const wheelV=sim.speed-yawRate*w.side;w.group.rotation.x-=wheelV*h/.075/8}
+ // Lean into the patrol curve, then recover as the safety controller brakes.
+ sim.lean=Math.atan(sim.speed*sim.speed/(R*9.81))
+ torso.rotation.z=sim.lean
+ const counterSwing=Math.min(.12,Math.abs(sim.accel)*.08)
+ for(const {side,upper,elbow} of arms){upper.rotation.x=side*counterSwing+Math.sin(sim.dist*2.1)*.025;elbow.rotation.x=.05+Math.max(0,sim.speed-.3)*.04}
+ const mass=48,rr=.075,perMotorTorque=Math.abs(mass*sim.accel*rr/4)+.45
+ const power=mass*Math.abs(sim.accel)*sim.speed+32*sim.speed
+ if(sim.failed)sim.stopDistance=Math.max(0,sim.stopDistance-sim.speed*h)
+ const state=sim.failed?(sim.speed>.01?'安全制动中':'已安全停车'):sim.speed<.03?'原地待机':'巡检巡航'
+ const sub=sim.failed?`停车距离剩余 ${fmt(sim.stopDistance,2)} m · 轮速 ${fmt(sim.wheelRpm,0)} rpm · 制动力矩 ${fmt(perMotorTorque,1)} N·m`:`车身倾角 ${fmt(sim.lean*180/Math.PI,1)}° · 轮速 ${fmt(sim.wheelRpm,0)} rpm · 驱动功率 ${fmt(power,0)} W`
+ lab.setHero(sim.speed,{state,sub,bad:sim.failed})
 })
-lab.breakIt({label:'关闭平衡控制',run(){sim.failed=true},reset(){sim.failed=false;sim.theta=0;sim.omega=0;sim.torque=0;sim.speed=0;sim.fallT=0;robot.rotation.set(0,0,0);robot.position.set(0,.87,0)}})
-lab.autoFilm({runBeat:'为机器人设定步行速度。',runSub:'踝关节力矩持续把质心稳定在支撑面上。',breakBeat:'现在断开平衡控制。',breakSub:'重力接管姿态，机身持续倾倒。'})
+lab.breakIt({label:'触发安全急停',run(){sim.failed=true;sim.stopDistance=sim.speed*sim.speed/(2*.55)},reset(){sim.failed=false;sim.speed=0;sim.command=0;sim.dist=0;sim.heading=0;sim.accel=0;sim.stopDistance=0;robot.position.set(-sim.turnRadius,0,0);robot.rotation.set(0,0,0);robot.position.set(-sim.turnRadius,0,0);for(const w of wheels)w.group.rotation.set(0,0,0);torso.rotation.set(0,0,0)}})
+lab.autoFilm({runBeat:'机器人开始自主巡检。',runSub:'差速轮驱动底盘，视觉传感器持续感知环境。',breakBeat:'触发安全急停。',breakSub:'控制器根据速度计算制动距离。'})
 lab.start()
 </script>
 </body>
