@@ -1625,7 +1625,7 @@ lab.label(robot,'抓取目标',{at:[.42,1.29,.34],value:()=>sim.pick>.9?'夹持�
 lab.label(robot,'轮式底盘',{at:[.30,.16,.25],value:()=>`${fmt(sim.wheelRpm,0)} rpm · ${fmt(sim.stopDistance,2)} m 急停距离`})
 const sim={speed:0,command:0,dist:0,heading:0,accel:0,wheelRpm:0,lean:0,failed:false,stopDistance:0,turnRadius:.9,pick:0}
 lab.hero({label:'行走速度',unit:'m/s',max:.8,digits:2})
-const drive=lab.slider({id:'drive',label:'行走速度',min:0,max:.8,value:0,unit:'m/s',ends:['停止','前进']})
+const drive=lab.slider({id:'drive',label:'行走速度',min:0,max:.8,value:0,unit:'m/s',digits:2,ends:['停止','前进']})
 const steering=lab.slider({id:'steering',label:'转向 / 原地转身',min:-1,max:1,value:0,step:.01,unit:'',ends:['左转','右转']})
 const bend=lab.slider({id:'bend',label:'弯腰姿态',min:0,max:40,value:0,unit:'°',ends:['直立','俯身']})
 const task=lab.slider({id:'reach',label:'抓取样本管',min:0,max:100,value:0,unit:'%',ends:['伸手','夹取']})
