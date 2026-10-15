@@ -1523,7 +1523,7 @@ export default LabKit
 <script type="module">
 const { THREE, Lab, MAT, GEO, clamp, approach, fmt } = window.LabKit
 
-// Reference-led mobile medical inspection robot, approximately 1.72 m tall and 48 kg.
+// Reference-led mobile medical inspection robot, approximately 1.85 m tall and 48 kg.
 // Assembly order: mobile base and wheels; lidar/safety bumper; lift column; torso shell;
 // vision head; shoulder, upper arm, elbow, forearm, wrist and grippers. Painted aluminium,
 // ABS shells, steel bearings, rubber wheels, black glass visor. 4 powered wheels, differential
@@ -1616,7 +1616,7 @@ lab.label(robot,'视觉与深度感知',{at:[0,1.95,.16],value:()=> '双目视�
 lab.label(robot,'轮式底盘',{at:[.30,.16,.25],value:()=>`${fmt(sim.wheelRpm,0)} rpm · ${fmt(sim.stopDistance,2)} m 急停距离`})
 const sim={speed:0,command:0,dist:0,heading:0,accel:0,wheelRpm:0,lean:0,failed:false,stopDistance:0,turnRadius:.9}
 lab.hero({label:'移动速度',unit:'m/s',max:.8,digits:2})
-const drive=lab.slider({id:'drive',label:'巡航指令',min:0,max:.8,value:.28,unit:'m/s',ends:['待机','巡检']})
+const drive=lab.slider({id:'drive',label:'巡航指令',min:0,max:.8,value:.12,unit:'m/s',ends:['待机','巡检']})
 lab.how('按参考照片搭建的移动医疗巡检机器人。四个驱动轮沿圆形巡检路线行驶；差速运动学计算轮速与航向，车身按向心加速度产生轻微倾斜。关闭驱动后，控制器按地面减速度计算滑行和停车距离。简化模型没有求解轮胎侧偏、地面接触变形或机械臂的完整动力学。',[
  'wheel rpm = 60 v / (2π r),  r = 0.075 m',
  'yaw rate = v / R,  R = 0.90 m',
